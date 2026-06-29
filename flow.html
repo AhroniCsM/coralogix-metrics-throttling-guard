@@ -80,6 +80,14 @@
   .card.w .api{color:var(--amber)}
   .card p{margin:0; font-size:13.5px; color:var(--dim)}
 
+  /* files / scripts list */
+  .files{display:flex; flex-direction:column; gap:12px}
+  .file{background:var(--panel); border:1px solid var(--line); border-radius:11px; padding:16px 18px}
+  .file .fn{font-family:var(--mono); font-size:14px; color:var(--green); margin-bottom:7px; display:flex; flex-wrap:wrap; align-items:center; gap:10px}
+  .file .fd{font-size:14px; color:var(--dim)}
+  .file .fd b{color:var(--ink); font-weight:600}
+  .when{font-family:var(--mono); font-size:10.5px; letter-spacing:.04em; text-transform:uppercase; padding:2px 9px; border-radius:20px; color:var(--faint); background:#ffffff08; border:1px solid var(--line); font-weight:600}
+
   /* code */
   pre{background:#0e1916; border:1px solid var(--line); border-radius:12px; padding:18px 20px; overflow-x:auto; margin:0 0 14px; font-family:var(--mono); font-size:13px; line-height:1.7; color:var(--ink)}
   pre .cm{color:var(--faint)}
@@ -246,6 +254,35 @@
     <div class="card"><h3>Detect</h3><span class="api">UsageService.GetMetricUsages</span><p>Reads per-metric daily usage and flags anything over your threshold. Read-only — also used by the healthcheck and preview run.</p></div>
     <div class="card w"><h3>Block</h3><span class="api">MetricsBlockingRules.Block</span><p>Creates a blocking rule that stops the metric's ingestion for the rest of the UTC day. Returns a rule id the tool records as its own.</p></div>
     <div class="card w"><h3>Unblock</h3><span class="api">MetricsBlockingRules.Allow</span><p>Removes rules by id — never by name — so it can't touch a rule you created by hand. Runs right after the daily reset.</p></div>
+  </div>
+
+  <h2>What each script does</h2>
+  <p class="sub">Two scripts do the real work; the rest are a shared library, a safe test runner, and scheduling.</p>
+  <div class="files">
+    <div class="file">
+      <div class="fn">detect_over_threshold.sh <span class="when t-cyan">scheduled · 15–60 min</span></div>
+      <div class="fd">The detector. Pages through every metric's daily usage, keeps those over your threshold, then (if enforcement is on) skips already-blocked metrics, applies your allowlist + per-run cap, and <b>blocks</b> the rest — recording each new rule (name + id) in <span class="inline">state.json</span>. With enforcement off it just detects and logs.</div>
+    </div>
+    <div class="file">
+      <div class="fn">unblock_midnight.sh <span class="when t-green">scheduled · acts 00:00 UTC</span></div>
+      <div class="fd">The unblock job. Wakes hourly, acts only during the configured UTC hour, and <b>unblocks</b> everything it blocked on completed days — by rule id only, in chunks, removing each from state as it succeeds. A failed unblock is kept and retried, never lost.</div>
+    </div>
+    <div class="file">
+      <div class="fn">lib_common.sh <span class="when">shared library</span></div>
+      <div class="fd">Sourced by both scripts. Provides logging, the file lock, atomic state writes, the auth header, the <span class="inline">grpcurl</span> wrappers with retry, and the read-only healthcheck. Not run directly.</div>
+    </div>
+    <div class="file">
+      <div class="fn">run_test.sh <span class="when">run by hand</span></div>
+      <div class="fd">Safe staged runner — <span class="inline">healthcheck · dryrun · live-one &lt;metric&gt; · unblock-now · status</span>. Encodes the safe presets so you can't accidentally widen the blast radius. Never edits your config.</div>
+    </div>
+    <div class="file">
+      <div class="fn">install_launchd.sh + *.plist <span class="when">macOS scheduling</span></div>
+      <div class="fd">Renders the schedule from your config and loads it via launchd: <span class="inline">install · uninstall · run · status · doctor</span>. On Linux you use cron / CronJobs instead.</div>
+    </div>
+    <div class="file">
+      <div class="fn">config.env <span class="when t-amber">the only file you edit</span></div>
+      <div class="fd">Every setting — API key, region, threshold, which dimension, enforcement switches, schedule, notifications.</div>
+    </div>
   </div>
 
   <h2>How to deploy it</h2>

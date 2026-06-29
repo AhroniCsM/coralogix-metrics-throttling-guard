@@ -123,7 +123,43 @@ Everything lives in **`config.env`**. Key settings:
 
 ---
 
-## What's in this repo
+## What each script does
+
+### `detect_over_threshold.sh` — the detector *(runs on a schedule)*
+The workhorse. On each run it:
+1. Pages through **every metric**'s usage for the current UTC day (`GetMetricUsages`) and keeps those over `THRESHOLD_UNITS` on your chosen dimension.
+2. If `BLOCK_ENABLED=true`: calls `List` to see what's already blocked and **skips it**, applies your `BLOCK_ALLOWLIST` and `MAX_BLOCKS_PER_RUN` cap, then calls `Block` (in chunks) on the rest.
+3. Re-checks with `List` and records each newly created rule (**metric name + rule id**) in a date-bucketed `data/state.json`, so the unblock job knows exactly what it owns.
+4. Writes `data/over_threshold_latest.json` (the current over-budget list) and appends a one-line JSON summary to `data/optimizer.log`.
+
+With `BLOCK_ENABLED=false` it does steps 1 + 4 only — pure detection, blocks nothing.
+
+### `unblock_midnight.sh` — the unblock job *(runs hourly, acts at 00:00 UTC)*
+Wakes every hour and **exits immediately unless** the current UTC hour matches `UNBLOCK_UTC_HOUR` (default 0). When it does act, for every completed (past) day bucket it:
+1. Gathers the rule ids it recorded as its own, and reconciles them against the live `List` (drops ids that are already gone).
+2. Calls `Allow` **by rule id only** (in chunks), removing each id from state as it succeeds.
+3. Deletes a day's bucket only once every rule in it is unblocked; a failed unblock is **kept and retried** next run, never lost.
+
+Pass `--force` / `--include-today` to run it manually outside the scheduled hour.
+
+### `lib_common.sh` — shared library *(not run directly)*
+Sourced by both scripts. Loads `config.env` and provides: logging, the cross-process `flock`, atomic state writes (temp-file + rename), the auth header, the `grpcurl` wrappers (with one retry), the Optimizer `List` helpers, and the read-only **healthcheck**.
+
+### `run_test.sh` — safe staged runner *(you run this by hand)*
+Encodes the safe bring-up stages as named presets so you can't fat-finger a wide blast radius. Subcommands: `healthcheck`, `dryrun`, `noop`, `live-one <metric>`, `unblock-now`, `status`. It only sets env vars for a child run — it **never edits `config.env`** — and only `live-one` and `unblock-now` change anything.
+
+### `install_launchd.sh` + `*.plist` — macOS scheduling
+Renders the two plist templates with this folder's path and your `DETECTOR_INTERVAL_SECONDS`, loads them via `launchctl bootstrap`, and verifies. Commands: `install`, `uninstall`, `run [detect|reset]`, `status`, `doctor`. (On Linux, use cron / CronJobs instead — see above.)
+
+### `run_scheduled.sh` — scheduler entry point
+A thin wrapper the scheduler invokes: sets a clean `PATH` and runs the requested job. You don't call it directly.
+
+### `config.env` — all settings *(the only file you edit)*
+Every knob lives here (API key, region, threshold, dimension, enforcement, schedule, notifications). Committed as a template with a placeholder key.
+
+---
+
+## File map
 
 | Path | What |
 |------|------|
