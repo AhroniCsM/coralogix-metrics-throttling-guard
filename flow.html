@@ -1,0 +1,290 @@
+<title>Metrics Throttling Guard — overview & technical guide</title>
+<style>
+  :root{
+    --bg:#0c1211; --panel:#131f1c; --panel-2:#17241f; --line:#27352f;
+    --ink:#e6ede9; --dim:#9aaaa4; --faint:#637069;
+    --green:#33e0a6; --cyan:#5fb0ff; --amber:#ffb454; --red:#ff6b6b;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box}
+  .wrap{
+    background:var(--bg); color:var(--ink); font-family:var(--sans);
+    line-height:1.6; padding:56px 24px 90px; min-height:100%;
+    background-image:radial-gradient(circle at 50% -8%, #16382e66, transparent 60%);
+  }
+  .page{max-width:960px; margin:0 auto}
+
+  .eyebrow{font-family:var(--mono); font-size:12px; letter-spacing:.24em; text-transform:uppercase; color:var(--green); margin:0 0 18px; text-align:center}
+  h1{font-size:clamp(30px,5.2vw,52px); line-height:1.05; font-weight:750; letter-spacing:-.025em; margin:0 auto 20px; text-wrap:balance; text-align:center; max-width:16ch}
+  h1 .hl{color:var(--green)}
+  .lede{font-size:clamp(17px,2.2vw,21px); color:var(--dim); max-width:60ch; margin:0 auto 14px; text-align:center}
+  .lede b{color:var(--ink); font-weight:600}
+
+  h2{font-size:clamp(22px,3vw,30px); font-weight:700; letter-spacing:-.02em; margin:72px 0 8px; text-align:center; text-wrap:balance}
+  .sub{color:var(--dim); text-align:center; margin:0 auto 34px; max-width:56ch; font-size:16px}
+
+  .divider{display:flex; align-items:center; gap:18px; margin:90px 0 4px}
+  .divider::before,.divider::after{content:""; flex:1; height:1px; background:var(--line)}
+  .divider span{font-family:var(--mono); font-size:12px; letter-spacing:.22em; text-transform:uppercase; color:var(--green)}
+
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(248px,1fr)); gap:16px}
+  .cap{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:24px 22px}
+  .cap .ic{width:42px; height:42px; border-radius:11px; display:grid; place-items:center; font-size:21px; margin-bottom:16px; background:#33e0a618; border:1px solid #33e0a633}
+  .cap h3{margin:0 0 7px; font-size:17px; font-weight:650; letter-spacing:-.01em}
+  .cap p{margin:0; font-size:14.5px; color:var(--dim)}
+  .cap b{color:var(--ink); font-weight:600}
+
+  .steps{display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:34px}
+  @media(max-width:680px){.steps{grid-template-columns:1fr}}
+  .step{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:24px 22px}
+  .step .no{font-family:var(--mono); font-size:13px; color:var(--green); font-weight:700; letter-spacing:.1em}
+  .step h3{margin:10px 0 6px; font-size:17px; font-weight:650}
+  .step p{margin:0; font-size:14.5px; color:var(--dim)}
+  .step .tag{display:inline-block; margin-top:12px; font-family:var(--mono); font-size:11px; padding:3px 9px; border-radius:20px}
+  .t-cyan{color:var(--cyan); background:#5fb0ff18; border:1px solid #5fb0ff33}
+  .t-amber{color:var(--amber); background:#ffb45418; border:1px solid #ffb45433}
+  .t-green{color:var(--green); background:#33e0a618; border:1px solid #33e0a633}
+
+  .diagram{background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:22px 18px 12px; overflow-x:auto}
+  .diagram svg{display:block; width:100%; min-width:680px; height:auto}
+  .note{color:var(--faint); font-size:14px; text-align:center; margin:18px auto 0; max-width:64ch}
+  .note b{color:var(--dim); font-weight:600}
+
+  .watch{display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin-top:6px}
+  .chip{background:var(--panel); border:1px solid var(--line); border-radius:24px; padding:11px 18px; font-size:14.5px}
+  .chip b{color:var(--ink); font-weight:650}
+  .chip .star{color:var(--amber); font-size:12px; margin-left:6px; font-family:var(--mono)}
+
+  .ctrl{display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px; padding:0; margin:0}
+  .ctrl li{list-style:none; background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--green); border-radius:10px; padding:16px 18px; font-size:14.5px; color:var(--dim)}
+  .ctrl b{color:var(--ink); display:block; margin-bottom:3px; font-size:15px; font-weight:600}
+
+  /* technical: algorithm flow */
+  .flow{counter-reset:s; list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px}
+  .flow li{counter-increment:s; position:relative; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px 18px 16px 60px; font-size:14.5px; color:var(--dim)}
+  .flow li::before{content:counter(s); position:absolute; left:16px; top:14px; width:28px; height:28px; border-radius:8px; background:#33e0a618; border:1px solid #33e0a644; color:var(--green); font-family:var(--mono); font-size:13px; font-weight:700; display:grid; place-items:center}
+  .flow b{color:var(--ink); font-weight:600}
+  .flow code,.inline{font-family:var(--mono); font-size:12.5px; color:var(--cyan); background:#5fb0ff14; padding:1px 6px; border-radius:4px}
+  .flow .w{color:var(--amber); background:#ffb45414}
+  .twocol{display:grid; grid-template-columns:1fr 1fr; gap:22px}
+  @media(max-width:720px){.twocol{grid-template-columns:1fr}}
+  .twocol h3{font-size:15px; font-family:var(--mono); margin:0 0 12px; display:flex; align-items:center; gap:9px}
+  .dotc{width:9px;height:9px;border-radius:50%;background:var(--amber);display:inline-block}
+  .dotg{width:9px;height:9px;border-radius:50%;background:var(--green);display:inline-block}
+
+  .cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px}
+  .card h3{margin:0 0 5px; font-size:15px; font-weight:650}
+  .card .api{font-family:var(--mono); font-size:12px; color:var(--cyan); display:block; margin-bottom:9px; word-break:break-all}
+  .card.w .api{color:var(--amber)}
+  .card p{margin:0; font-size:13.5px; color:var(--dim)}
+
+  /* code */
+  pre{background:#0e1916; border:1px solid var(--line); border-radius:12px; padding:18px 20px; overflow-x:auto; margin:0 0 14px; font-family:var(--mono); font-size:13px; line-height:1.7; color:var(--ink)}
+  pre .cm{color:var(--faint)}
+  pre .k{color:var(--green)}
+  pre .a{color:var(--amber)}
+  .deploy-step{font-family:var(--mono); font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:var(--green); margin:24px 0 10px}
+  .deploy-step:first-of-type{margin-top:0}
+
+  .foot{margin-top:72px; padding-top:20px; border-top:1px solid var(--line); color:var(--faint); font-size:13px; text-align:center}
+</style>
+
+<div class="wrap"><div class="page">
+
+  <p class="eyebrow">Coralogix · Metrics fair-usage protection</p>
+  <h1>Never let one metric <span class="hl">throttle</span> your whole account</h1>
+  <p class="lede">When metric usage runs over your fair-usage limit, Coralogix throttles ingestion and drops data <b>across every dashboard and alert at once</b>. This tool catches the few metrics responsible and blocks just them — automatically — so the rest of your monitoring keeps working.</p>
+
+  <h2>What you can do with it</h2>
+  <p class="sub">Put a safety valve on your metric spend, running on its own in the background.</p>
+  <div class="grid">
+    <div class="cap"><div class="ic">🛡️</div><h3>Stay under your limit</h3><p>Automatically block the metrics about to push you over your fair-usage quota — <b>before</b> Coralogix throttles everything.</p></div>
+    <div class="cap"><div class="ic">🎯</div><h3>Target the real offenders</h3><p>It blocks only the heavy hitters over your threshold. Every other metric keeps flowing untouched.</p></div>
+    <div class="cap"><div class="ic">🔁</div><h3>Set it and forget it</h3><p>Blocks during the day, <b>unblocks itself</b> when usage resets each night, and re-blocks if a metric climbs again.</p></div>
+    <div class="cap"><div class="ic">💸</div><h3>Protect your bill</h3><p>Stop a runaway metric — a bad deploy, an exploding label — from quietly burning your budget for a whole day.</p></div>
+  </div>
+
+  <h2>How it works — three steps</h2>
+  <p class="sub">It checks your account on a schedule and acts only when something is over budget.</p>
+  <div class="steps">
+    <div class="step"><div class="no">STEP 1</div><h3>Watch</h3><p>Reads each metric's usage for the day and finds the ones over your threshold.</p><span class="tag t-cyan">read-only</span></div>
+    <div class="step"><div class="no">STEP 2</div><h3>Block the offenders</h3><p>Stops ingestion of just those metrics, so they can't push the account into throttling.</p><span class="tag t-amber">blocks heavy metrics</span></div>
+    <div class="step"><div class="no">STEP 3</div><h3>Unblock at reset</h3><p>Usage resets at midnight UTC — it lifts every block automatically, ready for a clean new day.</p><span class="tag t-green">fully automatic</span></div>
+  </div>
+
+  <div class="diagram">
+    <svg viewBox="0 0 1000 300" role="img" aria-label="Metric usage over two days: it climbs, is blocked at the threshold, resets and is unblocked at midnight UTC, then re-blocks if it climbs again.">
+      <line x1="80" y1="230" x2="940" y2="230" stroke="#27352f" stroke-width="1.5"/>
+      <text x="80" y="252" font-family="ui-monospace,monospace" font-size="11" fill="#9aaaa4">midnight UTC</text>
+      <text x="500" y="252" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#33e0a6">midnight UTC · daily reset</text>
+      <text x="924" y="252" text-anchor="end" font-family="ui-monospace,monospace" font-size="11" fill="#9aaaa4">next day</text>
+      <rect x="330" y="50" width="168" height="180" fill="#ffb454" opacity="0.08"/>
+      <rect x="760" y="50" width="160" height="180" fill="#ffb454" opacity="0.08"/>
+      <line x1="500" y1="50" x2="500" y2="230" stroke="#33e0a6" stroke-width="1.5" stroke-dasharray="5 5" opacity="0.7"/>
+      <line x1="80" y1="115" x2="940" y2="115" stroke="#ffb454" stroke-width="1.5" stroke-dasharray="7 5"/>
+      <text x="940" y="107" text-anchor="end" font-family="ui-monospace,monospace" font-size="11" fill="#ffb454">your limit</text>
+      <polyline points="80,230 180,200 250,162 300,132 326,116 348,108 498,106" fill="none" stroke="#33e0a6" stroke-width="3" stroke-linejoin="round"/>
+      <polyline points="502,230 600,202 680,162 732,132 758,116 780,108 920,106" fill="none" stroke="#33e0a6" stroke-width="3" stroke-linejoin="round"/>
+      <circle cx="337" cy="113" r="6" fill="#ffb454"/><text x="337" y="92" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#ffb454">blocked</text>
+      <circle cx="500" cy="230" r="6" fill="#33e0a6"/><text x="500" y="222" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#33e0a6">unblocked</text>
+      <circle cx="767" cy="113" r="6" fill="#ffb454"/><text x="767" y="92" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#ffb454">re-blocked</text>
+    </svg>
+  </div>
+  <p class="note">The moment a metric crosses <b>your limit</b> it's blocked, so the account stays safe. At <b>midnight UTC</b> everything is unblocked for a fresh start — and re-blocked only if it climbs too high again.</p>
+
+  <h2>Decide what counts as "too much"</h2>
+  <p class="sub">Pick the measure that matters to you — the tool watches that one and blocks anything over your chosen limit.</p>
+  <div class="watch">
+    <div class="chip"><b>Cardinality</b> <span class="star">★ top cause</span></div>
+    <div class="chip"><b>Data volume</b> <span class="star">★</span></div>
+    <div class="chip"><b>Billing units</b></div>
+    <div class="chip"><b>Sample count</b></div>
+  </div>
+  <p class="note">★ <b>Cardinality</b> (too many label combinations) and <b>data volume</b> are the usual reasons accounts get throttled — most teams guard those two.</p>
+
+  <h2>You stay in control</h2>
+  <p class="sub">Cautious by default. You decide how much it's allowed to do.</p>
+  <ul class="ctrl">
+    <li><b>Preview mode</b>See exactly what it <em>would</em> block — without blocking anything — until you're comfortable.</li>
+    <li><b>Limit which metrics</b>Restrict it to a specific list, so it can only ever touch metrics you've approved.</li>
+    <li><b>Cap how many</b>Block just one metric per run to start, then open it up as you trust it.</li>
+    <li><b>Get notified</b>A Slack message whenever it blocks something, so there are no surprises.</li>
+    <li><b>Visible in Coralogix</b>Everything it blocks shows in the <b>Blocked Metrics</b> tab — unblock any of them in one click.</li>
+    <li><b>Safe unattended</b>It never removes a block someone created by hand, and cleans up reliably even after an interruption.</li>
+  </ul>
+
+  <!-- ===================== TECHNICAL ===================== -->
+  <div class="divider"><span>Under the hood</span></div>
+
+  <h2>Architecture</h2>
+  <p class="sub">Two small shell scripts (<span class="inline">bash</span> + <span class="inline">grpcurl</span>) on any scheduled host. They sit beside your stack, not in your data path — your metrics keep flowing normally.</p>
+  <div class="diagram">
+    <svg viewBox="0 0 1000 580" role="img" aria-label="Telemetry sources ship metrics to Coralogix; a scheduled runner calls the Coralogix Usage and Optimizer APIs to block and unblock metrics.">
+      <defs>
+        <marker id="g" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#33e0a6"/></marker>
+        <marker id="c" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#5fb0ff"/></marker>
+        <marker id="a" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#ffb454"/></marker>
+        <marker id="d" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#637069"/></marker>
+      </defs>
+      <rect x="24" y="40" width="360" height="170" rx="12" fill="#131f1c" stroke="#27352f"/>
+      <text x="44" y="68" font-family="ui-monospace,monospace" font-size="12" letter-spacing="1.5" fill="#9aaaa4">YOUR TELEMETRY SOURCES</text>
+      <text x="204" y="120" text-anchor="middle" font-family="var(--sans),sans-serif" font-size="13" fill="#e6ede9">Apps · Kubernetes · agents</text>
+      <text x="204" y="144" text-anchor="middle" font-family="var(--sans),sans-serif" font-size="12" fill="#9aaaa4">OpenTelemetry / Prometheus / OTLP</text>
+      <text x="204" y="178" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11" fill="#33e0a6">the metrics you pay for</text>
+
+      <rect x="546" y="40" width="430" height="330" rx="12" fill="#131f1c" stroke="#27352f"/>
+      <text x="566" y="68" font-family="ui-monospace,monospace" font-size="12" letter-spacing="1.5" fill="#9aaaa4">CORALOGIX · YOUR ACCOUNT · YOUR REGION</text>
+      <rect x="566" y="86" width="180" height="48" rx="8" fill="#17241f" stroke="#33e0a655"/>
+      <text x="656" y="108" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12.5" fill="#e6ede9">Ingest</text>
+      <text x="656" y="124" text-anchor="middle" font-family="var(--sans),sans-serif" font-size="10" fill="#637069">fair-usage limit applies</text>
+      <rect x="766" y="86" width="190" height="48" rx="8" fill="#17241f" stroke="#27352f"/>
+      <text x="861" y="108" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12.5" fill="#e6ede9">Metric store</text>
+      <text x="861" y="124" text-anchor="middle" font-family="var(--sans),sans-serif" font-size="10" fill="#637069">usage per UTC day</text>
+      <rect x="566" y="158" width="180" height="64" rx="8" fill="#0f1a18" stroke="#5fb0ff66"/>
+      <text x="656" y="183" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12.5" fill="#5fb0ff">Usage API</text>
+      <text x="656" y="201" text-anchor="middle" font-family="var(--sans),sans-serif" font-size="10" fill="#9aaaa4">GetMetricUsages</text>
+      <text x="656" y="215" text-anchor="middle" font-family="var(--sans),sans-serif" font-size="9.5" fill="#637069">read-only</text>
+      <rect x="766" y="158" width="190" height="64" rx="8" fill="#0f1a18" stroke="#ffb45466"/>
+      <text x="861" y="183" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12.5" fill="#ffb454">Optimizer API</text>
+      <text x="861" y="201" text-anchor="middle" font-family="var(--sans),sans-serif" font-size="10" fill="#9aaaa4">Block · List · Allow</text>
+      <text x="861" y="215" text-anchor="middle" font-family="var(--sans),sans-serif" font-size="9.5" fill="#637069">manages blocking rules</text>
+      <rect x="566" y="246" width="390" height="48" rx="8" fill="#17241f" stroke="#ff6b6b55"/>
+      <text x="761" y="269" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12.5" fill="#ff6b6b">“Blocked Metrics” UI tab</text>
+      <text x="761" y="285" text-anchor="middle" font-family="var(--sans),sans-serif" font-size="10" fill="#637069">shows exactly the rules the guard creates</text>
+      <line x1="746" y1="110" x2="764" y2="110" stroke="#637069" stroke-width="1.5" marker-end="url(#d)"/>
+      <line x1="656" y1="134" x2="656" y2="156" stroke="#637069" stroke-width="1.5" marker-end="url(#d)"/>
+      <line x1="861" y1="222" x2="861" y2="244" stroke="#ffb45488" stroke-width="1.5" marker-end="url(#d)"/>
+      <line x1="384" y1="120" x2="562" y2="108" stroke="#33e0a6" stroke-width="2.5" marker-end="url(#g)"/>
+      <text x="470" y="100" text-anchor="middle" font-family="ui-monospace,monospace" font-size="10" fill="#33e0a6">metrics ingested</text>
+
+      <rect x="270" y="410" width="460" height="150" rx="12" fill="#131f1c" stroke="#27352f"/>
+      <text x="290" y="438" font-family="ui-monospace,monospace" font-size="12" letter-spacing="1.5" fill="#9aaaa4">THE GUARD · scheduled runner (cron / k8s CronJob)</text>
+      <rect x="290" y="456" width="195" height="84" rx="8" fill="#17241f" stroke="#27352f"/>
+      <text x="387" y="482" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11.5" fill="#e6ede9">detect_over_</text>
+      <text x="387" y="497" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11.5" fill="#e6ede9">threshold.sh</text>
+      <text x="387" y="517" text-anchor="middle" font-family="var(--sans),sans-serif" font-size="10.5" fill="#9aaaa4">every 15–60 min</text>
+      <text x="387" y="531" text-anchor="middle" font-family="var(--sans),sans-serif" font-size="10" fill="#637069">detect → Block</text>
+      <rect x="505" y="456" width="205" height="84" rx="8" fill="#17241f" stroke="#27352f"/>
+      <text x="607" y="482" text-anchor="middle" font-family="ui-monospace,monospace" font-size="11.5" fill="#e6ede9">unblock_midnight.sh</text>
+      <text x="607" y="502" text-anchor="middle" font-family="var(--sans),sans-serif" font-size="10.5" fill="#9aaaa4">at 00:00 UTC</text>
+      <text x="607" y="520" text-anchor="middle" font-family="var(--sans),sans-serif" font-size="10" fill="#637069">lifts what it blocked</text>
+      <path d="M 430 456 C 470 360, 560 300, 632 224" fill="none" stroke="#5fb0ff" stroke-width="2.5" stroke-dasharray="6 5" marker-end="url(#c)"/>
+      <text x="452" y="392" font-family="ui-monospace,monospace" font-size="10" fill="#5fb0ff">① read daily usage</text>
+      <path d="M 480 456 C 620 380, 760 300, 838 224" fill="none" stroke="#ffb454" stroke-width="2.5" marker-end="url(#a)"/>
+      <text x="648" y="362" font-family="ui-monospace,monospace" font-size="10" fill="#ffb454">② Block&nbsp;&nbsp;③ Allow</text>
+    </svg>
+  </div>
+
+  <h2>What it actually does</h2>
+  <p class="sub">All usage is evaluated per UTC calendar day — the same boundary Coralogix resets on.</p>
+  <div class="twocol">
+    <div>
+      <h3><span class="dotc"></span> Detector — every 15–60 min</h3>
+      <ol class="flow">
+        <li>Pages through <b>every metric</b> with <code>GetMetricUsages</code> for today and keeps those over <span class="w">THRESHOLD_UNITS</span> on the chosen dimension.</li>
+        <li>Calls <code>List</code> and <b>drops any metric already blocked</b> — never double-blocks or claims another rule.</li>
+        <li>Applies your <span class="w">allowlist</span> and <span class="w">per-run cap</span> to the remaining candidates.</li>
+        <li>Calls <code class="w">Block</code> in chunks, then re-<code>List</code>s to confirm and records each new rule (<b>name + rule id</b>) in a date-bucketed <span class="inline">state.json</span>.</li>
+      </ol>
+    </div>
+    <div>
+      <h3><span class="dotg"></span> Unblock — hourly, acts at 00:00 UTC</h3>
+      <ol class="flow">
+        <li>Wakes hourly and exits immediately unless the current UTC hour is the configured unblock hour.</li>
+        <li>For every <b>past-day</b> bucket, gathers the rule ids it recorded as its own.</li>
+        <li>Calls <code class="w">Allow</code> by <b>rule id only</b>, in chunks, removing each id from state as it succeeds.</li>
+        <li>Deletes a day bucket only once fully unblocked; a failed unblock is <b>kept and retried</b>, never lost.</li>
+      </ol>
+    </div>
+  </div>
+  <p class="note">State is written atomically and both scripts share a file lock, so they can't race or corrupt state around the midnight boundary. The whole thing is idempotent and crash-safe.</p>
+
+  <h2>The three gRPC calls</h2>
+  <div class="cards">
+    <div class="card"><h3>Detect</h3><span class="api">UsageService.GetMetricUsages</span><p>Reads per-metric daily usage and flags anything over your threshold. Read-only — also used by the healthcheck and preview run.</p></div>
+    <div class="card w"><h3>Block</h3><span class="api">MetricsBlockingRules.Block</span><p>Creates a blocking rule that stops the metric's ingestion for the rest of the UTC day. Returns a rule id the tool records as its own.</p></div>
+    <div class="card w"><h3>Unblock</h3><span class="api">MetricsBlockingRules.Allow</span><p>Removes rules by id — never by name — so it can't touch a rule you created by hand. Runs right after the daily reset.</p></div>
+  </div>
+
+  <h2>How to deploy it</h2>
+  <p class="sub">Read-only until you explicitly enable enforcement. Prove the round-trip by hand, then schedule it.</p>
+
+  <p class="deploy-step">1 · Prerequisites</p>
+  <pre><span class="cm"># the runner just needs three CLIs on PATH</span>
+grpcurl   <span class="cm"># gRPC client (talks to Coralogix over reflection — no protos)</span>
+jq        <span class="cm"># JSON processing</span>
+flock     <span class="cm"># cross-process lock (ships with util-linux; brew install flock on macOS)</span></pre>
+
+  <p class="deploy-step">2 · Configure (config.env — the only file you edit)</p>
+  <pre><span class="k">CX_API_KEY</span>=<span class="cm">"&lt;team-or-personal-api-key&gt;"</span>   <span class="cm"># DataAnalytics read + manage blocking rules</span>
+<span class="k">USAGE_ENDPOINT</span>=<span class="cm">"api.&lt;region&gt;.coralogix.com:443"</span>  <span class="cm"># eu1 eu2 us1 us2 ap1 ap2 ap3</span>
+<span class="k">USAGE_FIELD</span>=<span class="cm">"cardinality"</span>      <span class="cm"># or unit_usage | bytes_volume | sample_count</span>
+<span class="k">THRESHOLD_UNITS</span>=<span class="cm">"100000"</span>       <span class="cm"># flag metrics over this, per day</span>
+<span class="k">BLOCK_ENABLED</span>=<span class="cm">"false"</span>          <span class="a"># master switch — start in preview (blocks nothing)</span></pre>
+
+  <p class="deploy-step">3 · Prove it by hand (read-only → one real block → unblock)</p>
+  <pre>./run_test.sh <span class="k">healthcheck</span>          <span class="cm"># verify key + endpoint + auth on both APIs</span>
+./run_test.sh <span class="k">dryrun</span>               <span class="cm"># real detection, blocks NOTHING</span>
+./run_test.sh <span class="k">live-one</span> &lt;metric&gt;     <span class="a"># block exactly one metric (asks to confirm)</span>
+./run_test.sh <span class="k">unblock-now</span>          <span class="cm"># lift it again — full lifecycle proven</span></pre>
+
+  <p class="deploy-step">4 · Schedule it (production)</p>
+  <pre><span class="cm"># Linux cron — detector every 15 min, unblock hourly (self-gates to 00:00 UTC)</span>
+*/15 * * * *  /opt/metrics-guard/detect_over_threshold.sh  &gt;&gt; /var/log/metrics-guard.log 2&gt;&amp;1
+5   * * * *  /opt/metrics-guard/unblock_midnight.sh        &gt;&gt; /var/log/metrics-guard.log 2&gt;&amp;1</pre>
+  <pre><span class="cm"># …or two Kubernetes CronJobs (config in a Secret), image = your scripts + grpcurl + jq</span>
+kind: <span class="k">CronJob</span>   <span class="cm"># metrics-guard-detect</span>
+  schedule: <span class="cm">"*/15 * * * *"</span>
+  command: [<span class="cm">"/app/detect_over_threshold.sh"</span>]
+  envFrom: [{ secretRef: { name: metrics-guard-config }}]
+---
+kind: <span class="k">CronJob</span>   <span class="cm"># metrics-guard-unblock</span>
+  schedule: <span class="cm">"5 * * * *"</span>
+  command: [<span class="cm">"/app/unblock_midnight.sh"</span>]</pre>
+  <p class="note">macOS hosts can use the bundled <span class="inline">install_launchd.sh</span> instead of cron. Run one folder (config + state) per account/region; guard <b>cardinality</b> and <b>volume</b> as two separate instances.</p>
+
+  <p class="foot">Coralogix metrics throttling guard · bash + grpcurl over gRPC/TLS · all timing in UTC · everything visible and reversible in your account</p>
+
+</div></div>

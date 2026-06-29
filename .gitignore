@@ -1,0 +1,10 @@
+# Runtime state & logs (created on first run)
+data/
+*.lock
+*.log
+
+# Never commit a config that contains a real API key.
+# config.env is committed as a TEMPLATE (placeholder key only). If you put your
+# real key directly in it, untrack it:  git rm --cached config.env
+config.env.local
+*.key

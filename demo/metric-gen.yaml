@@ -1,0 +1,143 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: metric-block-test
+---
+# OPTIONAL demo workload — only needed if you want a SAFE throwaway metric to
+# test the guard against. A tiny dependency-free Prometheus exporter publishes a
+# uniquely-named metric (demo_metric_units) across many series so its Coralogix
+# usage climbs quickly, then an OpenTelemetry collector ships it to your account.
+# Before applying: set the collector `domain` + ingest key below for your region.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metric-gen-src
+  namespace: metric-block-test
+data:
+  gen.py: |
+    import http.server, random
+    N = 400  # number of series -> drives up daily "unit" usage fast
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path.startswith('/metrics'):
+                out = ["# TYPE demo_metric_units gauge"]
+                for i in range(N):
+                    out.append('demo_metric_units{idx="%d"} %.3f' % (i, random.random()*100))
+                body = ("\n".join(out) + "\n").encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/plain; version=0.0.4')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            else:
+                self.send_response(404); self.end_headers()
+        def log_message(self, *a): pass
+    print("metric-gen serving :8080/metrics with %d series" % N, flush=True)
+    http.server.HTTPServer(('0.0.0.0', 8080), H).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metric-gen
+  namespace: metric-block-test
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: metric-gen } }
+  template:
+    metadata:
+      labels: { app: metric-gen }
+    spec:
+      containers:
+        - name: gen
+          image: python:3.12-slim
+          command: ["python", "/src/gen.py"]
+          ports: [{ containerPort: 8080 }]
+          volumeMounts:
+            - { name: src, mountPath: /src }
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits:   { cpu: 100m, memory: 64Mi }
+      volumes:
+        - name: src
+          configMap: { name: metric-gen-src }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: metric-gen
+  namespace: metric-block-test
+spec:
+  selector: { app: metric-gen }
+  ports: [{ port: 8080, targetPort: 8080 }]
+---
+# Ingest (Send-Your-Data) key for your account. Paste a key, or inject it at
+# apply time, e.g.:  sed "s|__INGEST_KEY__|$KEY|" metric-gen.yaml | kubectl apply -f -
+apiVersion: v1
+kind: Secret
+metadata:
+  name: coralogix-ingest
+  namespace: metric-block-test
+type: Opaque
+stringData:
+  PRIVATE_KEY: "__INGEST_KEY__"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otelcol-config
+  namespace: metric-block-test
+data:
+  config.yaml: |
+    receivers:
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: block-test
+              scrape_interval: 10s
+              static_configs:
+                - targets: ['metric-gen.metric-block-test.svc.cluster.local:8080']
+    processors:
+      batch: {}
+    exporters:
+      coralogix:
+        domain: "<REGION>.coralogix.com"   # e.g. eu2.coralogix.com — match your account region
+        private_key: "${env:CORALOGIX_PRIVATE_KEY}"
+        application_name: "metric-block-test"
+        subsystem_name: "generator"
+        timeout: 30s
+      debug:
+        verbosity: basic
+    service:
+      pipelines:
+        metrics:
+          receivers: [prometheus]
+          processors: [batch]
+          exporters: [coralogix, debug]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otelcol
+  namespace: metric-block-test
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: otelcol } }
+  template:
+    metadata:
+      labels: { app: otelcol }
+    spec:
+      containers:
+        - name: otelcol
+          image: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.151.0
+          args: ["--config=/etc/otelcol/config.yaml"]
+          env:
+            - name: CORALOGIX_PRIVATE_KEY
+              valueFrom: { secretKeyRef: { name: coralogix-ingest, key: PRIVATE_KEY } }
+          volumeMounts:
+            - { name: cfg, mountPath: /etc/otelcol }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { cpu: 200m, memory: 256Mi }
+      volumes:
+        - name: cfg
+          configMap: { name: otelcol-config }

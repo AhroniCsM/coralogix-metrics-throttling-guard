@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Detector — runs on an interval. All behavior (threshold, BLOCK_ENABLED,
+  allowlist) comes from config.env in the WorkingDirectory below. This plist
+  only schedules.
+
+  NOTE: __DIR__ and __INTERVAL__ are placeholders. install_launchd.sh replaces
+  __DIR__ with the real folder path and __INTERVAL__ with DETECTOR_INTERVAL_SECONDS
+  from config.env, at install time. So you change the run frequency by editing
+  config.env (DETECTOR_INTERVAL_SECONDS) and reinstalling — never this file.
+  Keep this folder OUTSIDE Desktop/Documents/Downloads (macOS blocks launchd there).
+
+  Install:  ./install_launchd.sh install
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.coralogix.metricoptimizer.detector</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__DIR__/run_scheduled.sh</string>
+        <string>detect</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__DIR__</string>
+
+    <!-- Run interval in seconds (from DETECTOR_INTERVAL_SECONDS in config.env).
+         First run happens ~immediately after load. -->
+    <key>StartInterval</key>
+    <integer>__INTERVAL__</integer>
+
+    <key>StandardOutPath</key>
+    <string>__DIR__/data/launchd.detector.out</string>
+    <key>StandardErrorPath</key>
+    <string>__DIR__/data/launchd.detector.err</string>
+</dict>
+</plist>

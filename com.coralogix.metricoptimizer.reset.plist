@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Reset (unblock) — wakes HOURLY and decides for itself, in UTC, whether to act.
+
+  There is deliberately NO clock/timezone in this schedule. launchd just runs
+  the job every hour (StartInterval 3600). The script (unblock_midnight.sh)
+  checks the current UTC hour against UNBLOCK_UTC_HOUR in config.env and exits
+  immediately unless they match. So:
+    * the time the unblock happens is set ENTIRELY by UNBLOCK_UTC_HOUR in config,
+    * it's evaluated in UTC (matching the Coralogix backend),
+    * no local-time conversion or daylight-saving handling is needed anywhere.
+  Change the unblock time by editing UNBLOCK_UTC_HOUR — never this file.
+
+  NOTE: __DIR__ is a placeholder; install_launchd.sh substitutes the real folder
+  path at install time. Keep this folder OUTSIDE Desktop/Documents/Downloads
+  (macOS blocks launchd from those).
+
+  Install:  ./install_launchd.sh install
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.coralogix.metricoptimizer.reset</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__DIR__/run_scheduled.sh</string>
+        <string>unblock</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__DIR__</string>
+
+    <!-- Wake every hour; the script gates on UNBLOCK_UTC_HOUR (UTC) itself. -->
+    <key>StartInterval</key>
+    <integer>3600</integer>
+    <key>ThrottleInterval</key>
+    <integer>3600</integer>
+
+    <key>StandardOutPath</key>
+    <string>__DIR__/data/launchd.reset.out</string>
+    <key>StandardErrorPath</key>
+    <string>__DIR__/data/launchd.reset.err</string>
+</dict>
+</plist>
